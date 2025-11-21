@@ -143,6 +143,7 @@ fi
     cp "$base_location_api/__init__.py" "$pip_location_1/__init__.py"
     cp "$base_location_api/resources.py" "$pip_location_1/resources.py"
     cp "$base_location_api/user.py" "$pip_location/$user_location/user.py"
+    cp "$base_location_api/usage.py" "$pip_location/panel/usage.py"
     cp "$base_location/update.py" "$script_location/update.py"
 
     chmod +x "$script_location/update.py"
