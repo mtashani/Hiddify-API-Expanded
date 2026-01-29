@@ -50,7 +50,7 @@ echo "Setting permissions for /opt/hiddify-manager/log/"
 sudo chmod -R 777 /opt/hiddify-manager/log/
 
 echo "Cloning repo"
-repository_url="https://github.com/mtashani/Hiddify-API-Expanded.git"
+repository_url="https://github.com/B3H1Z/Hiddify-API-Expanded.git"
 install_dir="/opt/Hiddify-API-Expanded"
 if [ -d "$install_dir" ]; then
     echo "Removing old installation"
