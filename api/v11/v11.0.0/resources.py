@@ -16,6 +16,8 @@ from hiddifypanel.panel import hiddify
 from hiddifypanel.drivers import user_driver
 from hiddifypanel.database import db
 from hiddifypanel import  cache, hutils
+from hiddifypanel.panel.usage import redis_lock
+
 
 from hiddifypanel.VERSION import __version__
 
@@ -93,45 +95,28 @@ class bulkUsers(Resource):
 
     def get(self):
         try:
-            uuid_list  = request.json
+            uuid_list = request.json
             users = User.query.filter(User.uuid.in_(uuid_list)).all()
             return jsonify([user.to_dict() for user in users])
         except Exception as e:
             logger.exception(f"Error in get bulk users {e}")
-            return jsonify({'status': 250, 'msg': f"error{e}"})
+            return jsonify({'status': 250, 'msg': f"error: {e}"})
 
-    # def get(self):
-    #     return jsonify({'status': 200, 'msg': 'Hello Hidi-bot'})
-        
     def post(self):
         start_time = time.time()
-        lock_key = "lock-update-local-usage"
-        LOCK_EXPIRE = 60   # Lock is valid for 1 minute
-        MAX_WAIT = 180     # Max time to wait for lock
-        WAIT_INTERVAL = 1  # Seconds between each check
+        update = request.args.get('update') or False
+        users = request.json
 
         try:
-            waited = 0
-            while not cache.redis_client.set(lock_key, "locked", nx=True, ex=LOCK_EXPIRE):
-                if waited >= MAX_WAIT:
-                    return jsonify({
-                        'status': 500,
-                        'msg': f'Another usage update is still running after waiting {MAX_WAIT} seconds.'
-                    })
-                time.sleep(WAIT_INTERVAL)
-                waited += WAIT_INTERVAL
+           
+            with redis_lock("lock-update-local-usage", timeout=60, sleep=0.1):
 
-            update = request.args.get('update') or False
-            users = request.json
-
-            if update:
-                try:
+                if update:
                     update_start_time = time.time()
-                    
                     bulk_update_users(users)
                     hiddify.quick_apply_users()
-                    
                     update_end_time = time.time()
+
                     total_time = update_end_time - start_time
                     update_duration = update_end_time - update_start_time
 
@@ -139,20 +124,16 @@ class bulkUsers(Resource):
                         'status': 200,
                         'msg': f'All users updated by new method successfully. Total: {total_time:.2f}s, Update: {update_duration:.2f}s'
                     })
-                except Exception as e:
-                    logger.exception(f"Error in post bulk users for update {e}")
-                    return jsonify({'status': 250, 'msg': f"error: {e}"})
-            else:
-                try:
+
+                else:
                     process_start_time = time.time()
-                    
                     User.bulk_register(users)
                     for newuser in users:
                         user = User.by_uuid(newuser['uuid']) or abort(202, f"Cannot find user {newuser['uuid']}")
                         user_driver.add_client(user)
                     hiddify.quick_apply_users()
-
                     process_end_time = time.time()
+
                     total_time = process_end_time - start_time
                     process_duration = process_end_time - process_start_time
 
@@ -160,19 +141,11 @@ class bulkUsers(Resource):
                         'status': 200,
                         'msg': f'All users updated successfully. Total: {total_time:.2f}s, Process: {process_duration:.2f}s'
                     })
-                except Exception as e:
-                    logger.exception(f"Error in registering bulk users {e}")
-                    return jsonify({'status': 250, 'msg': f"error: {e}"})
-        
-        except Exception as e:
-            logger.exception(f"Error acquiring lock: {e}")
-            return jsonify({'status': 250, 'msg': f"error acquiring lock: {e}"})
 
-        finally:
-            try:
-                cache.redis_client.delete(lock_key)
-            except Exception as e:
-                logger.warning(f"Failed to release Redis lock: {e}")
+        except Exception as e:
+            logger.exception(f"Error in POST bulkUsers: {e}")
+            return jsonify({'status': 250, 'msg': f"error: {e}"})
+
 
 
     
@@ -228,51 +201,31 @@ class UpdateUsage(Resource):
     decorators = [login_required({Role.super_admin})]
 
     def get(self):
-        lock_key = "lock-update-local-usage"
-        LOCK_EXPIRE = 60  # قفل 5 دقیقه معتبره
-        MAX_WAIT = 180     # حداکثر زمان انتظار
-        WAIT_INTERVAL = 1  # فاصله بررسی
-
-        waited = 0
-        while not cache.redis_client.set(lock_key, "locked", nx=True, ex=LOCK_EXPIRE):
-            if waited >= MAX_WAIT:
-                return jsonify({
-                    'status': 500,
-                    'msg': 'Another usage update is still running after waiting {} seconds.'.format(MAX_WAIT)
-                })
-            time.sleep(WAIT_INTERVAL)
-            waited += WAIT_INTERVAL
-            
-        # if not cache.redis_client.set(lock_key, "locked", nx=True, ex=LOCK_EXPIRE):
-        #     return jsonify({
-        #         'status': 500,
-        #         'msg': 'Another usage update is running. Please try again in a few minutes.'
-        #     })
-
         try:
-            result = None
-
-            try:
-                subprocess.run(['pgrep', '-f', 'update-usage'], check=True)
-            except subprocess.CalledProcessError:
+            with redis_lock("lock-update-local-usage", timeout=60, sleep=0.1):
+                # بررسی اینکه پروسه در حال اجرا هست یا نه
                 try:
-                    result = subprocess.run(["python3", "-m", "hiddifypanel", "update-usage"], capture_output=True, text=True, check=True)
-                except Exception as e:
-                    return jsonify({'status': 502, 'msg': f'error\n{e}','code':str(e.__traceback__.tb_lineno)})
+                    subprocess.run(['pgrep', '-f', 'update-usage'], check=True)
+                    return jsonify({'status': 200, 'msg': 'update-usage already running'})
+                except subprocess.CalledProcessError:
+                    # اگر در حال اجرا نیست، اجرا کن
+                    try:
+                        result = subprocess.run(
+                            ["python3", "-m", "hiddifypanel", "update-usage"],
+                            capture_output=True,
+                            text=True,
+                            check=True
+                        )
+                    except Exception as e:
+                        return jsonify({'status': 502, 'msg': f'error\n{e}', 'code': str(e.__traceback__.tb_lineno)})
 
-            if not result:
-                return jsonify({'status': 502, 'msg': 'error\nresult is None','code':str(e.__traceback__.tb_lineno)})
-
-            # if result.stderr:
-            #     return jsonify({'status': 502, 'msg': f'error\n{result.stderr}','code':str(e.__traceback__.tb_lineno)})
-
-            if result.stdout:
-                return jsonify({'status': 200, 'msg': 'ok', 'output': result.stdout})
-            else:
-                return jsonify({'status': 502, 'msg': 'error\nresult.stdout is None','code':str(e.__traceback__.tb_lineno)})
+                if result.stdout:
+                    return jsonify({'status': 200, 'msg': 'ok', 'output': result.stdout})
+                else:
+                    return jsonify({'status': 502, 'msg': 'error\nresult.stdout is None'})
         except Exception as e:
-            return jsonify({'status': 502, 'msg': f'error\n{e}','code':str(e.__traceback__.tb_lineno)})
-        
+            return jsonify({'status': 502, 'msg': f'error\n{e}', 'code': str(e.__traceback__.tb_lineno)})
+
         
 class Status(Resource):
     decorators = [login_required({Role.super_admin})]
