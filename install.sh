@@ -50,7 +50,7 @@ echo "Setting permissions for /opt/hiddify-manager/log/"
 sudo chmod -R 777 /opt/hiddify-manager/log/
 
 echo "Cloning repo"
-repository_url="https://github.com/B3H1Z/Hiddify-API-Expanded.git"
+repository_url="https://github.com/mtashani/Hiddify-API-Expanded.git"
 install_dir="/opt/Hiddify-API-Expanded"
 if [ -d "$install_dir" ]; then
     echo "Removing old installation"
@@ -132,6 +132,10 @@ elif [ "$major_version" -eq 10 ]; then
 elif [ "$major_version" -eq 11 ]; then
     echo "HiddifyPanel version is 11"
     base_location_api="$base_location_api/v11/v11.0.0"
+    pip_location_1="$pip_location_1/v1"
+elif [ "$major_version" -eq 12 ]; then
+    echo "HiddifyPanel version is 12"
+    base_location_api="$base_location_api/v12/v12.0.0"
     pip_location_1="$pip_location_1/v1"
 else
     display_error_and_exit "HiddifyPanel version is not supported!"
