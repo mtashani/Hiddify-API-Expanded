@@ -15,7 +15,7 @@ from hiddifypanel.auth import login_required
 from hiddifypanel.panel import hiddify
 from hiddifypanel.drivers import user_driver
 from hiddifypanel.database import db
-from hiddifypanel import  cache, hutils
+from hiddifypanel import  hutils
 from hiddifypanel.panel.usage import redis_lock
 
 
